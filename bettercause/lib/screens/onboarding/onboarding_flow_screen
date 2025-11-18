@@ -1,0 +1,119 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../utils/onboarding_questions.dart';
+import '../../services/onboarding_service.dart';
+import 'onboarding_question_screen.dart';
+
+class OnboardingFlowScreen extends StatefulWidget {
+  const OnboardingFlowScreen({super.key});
+
+  @override
+  State<OnboardingFlowScreen> createState() => _OnboardingFlowScreenState();
+}
+
+class _OnboardingFlowScreenState extends State<OnboardingFlowScreen> {
+  late PageController _pageController;
+  late List<dynamic> questions;
+  int _currentIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    questions = OnboardingQuestions.getQuestions();
+    _pageController = PageController();
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  void _nextPage() {
+    if (_currentIndex < questions.length - 1) {
+      setState(() {
+        _currentIndex++;
+      });
+      _pageController.nextPage(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+      );
+    } else {
+      _completeOnboarding();
+    }
+  }
+
+  void _previousPage() {
+    if (_currentIndex > 0) {
+      setState(() {
+        _currentIndex--;
+      });
+      _pageController.previousPage(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+      );
+    } else {
+      Navigator.pop(context);
+    }
+  }
+
+  Future<void> _completeOnboarding() async {
+    final service = context.read<OnboardingService>();
+
+    // Show loading dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+
+    // Simulate a brief loading (optional)
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    // Data is already saved in OnboardingService
+    // We'll connect to backend later
+    
+    if (mounted) {
+      Navigator.pop(context); // Close loading dialog
+
+      // Navigate to main app
+      // TODO: Replace with your main app navigation
+      Navigator.pushReplacementNamed(context, '/main');
+      
+      // Alternative: If you don't have a home route yet, use this:
+      // Navigator.pushReplacement(
+      //   context,
+      //   MaterialPageRoute(builder: (context) => const YourHomeScreen()),
+      // );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return WillPopScope(
+      onWillPop: () async {
+        _previousPage();
+        return false;
+      },
+      child: PageView.builder(
+        controller: _pageController,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: questions.length,
+        onPageChanged: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+        itemBuilder: (context, index) {
+          return OnboardingQuestionScreen(
+            question: questions[index],
+            onNext: _nextPage,
+            onBack: _previousPage,
+          );
+        },
+      ),
+    );
+  }
+}

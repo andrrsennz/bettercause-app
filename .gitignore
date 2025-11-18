@@ -1,0 +1,16 @@
+# === Backend (Node.js / TypeScript) ===
+/bettercause-backend/node_modules
+/bettercause-backend/.env
+/bettercause-backend/dist
+
+# === Frontend (Flutter) ===
+/bettercause/build
+/bettercause/.dart_tool
+/bettercause/.idea
+/bettercause/.flutter-plugins
+/bettercause/.flutter-plugins-dependencies
+
+# === OS Files ===
+.idea
+__MACOSX
+.DS_Store
