@@ -7,6 +7,7 @@ import 'screens/auth/register_screen.dart';
 import 'screens/onboarding/onboarding_flow_screen';
 import 'services/onboarding_service.dart';
 import 'screens/main_navigation_screen.dart';
+import 'providers/auth_provider.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -28,7 +29,9 @@ class MyApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => OnboardingService()),
+        ChangeNotifierProvider(create: (_) => AuthProvider()),   // ✅ ADD THIS
       ],
+
       child: MaterialApp(
         title: 'BetterCause',
         debugShowCheckedModeBanner: false,

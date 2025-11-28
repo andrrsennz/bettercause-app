@@ -14,5 +14,47 @@ model User {
   password  String
   createdAt DateTime @default(now()) @map("created_at")
 
-  @@map("users") // <-- IMPORTANT: use table `users` instead of `User`
+  personalValues      UserPersonalValues?
+  categoryPreferences UserCategoryPreference[]
+
+  @@map("users")
+}
+
+// Add this enum (anywhere near your other enums)
+enum CategoryType {
+  food_beverages
+  beauty_care
+}
+
+// Add these models
+
+model UserPersonalValues {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  vegan       Boolean @default(false)
+  crueltyFree Boolean @default(false)
+  organic     Boolean @default(false)
+  ecoFriendly Boolean @default(false)
+  halal       Boolean @default(false)
+  fairLabor   Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model UserCategoryPreference {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  category CategoryType
+  key      String // e.g. "Vegan Diet", "Low Sugar", etc.
+  enabled  Boolean      @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, category, key])
 }

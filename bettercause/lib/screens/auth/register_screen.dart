@@ -51,10 +51,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       if (!mounted) return;
 
-      setState(() => _isLoading = false);
+            setState(() => _isLoading = false);
 
-      // Navigate to HOME after successful register
-      Navigator.pushReplacementNamed(context, '/main');
+      // ✅ After successful register, go to LOGIN instead of HOME
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Account created! Please log in.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+      Navigator.pushReplacementNamed(context, '/login');
+
 
     } catch (e) {
       if (!mounted) return;
