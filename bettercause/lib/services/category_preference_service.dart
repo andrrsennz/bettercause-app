@@ -5,7 +5,7 @@ import '../models/category_preference_model.dart';
 import '../utils/category_key_mapper.dart';
 
 class CategoryPreferenceService {
-  static const String baseUrl = 'http://10.0.2.2:8080/api';
+  static const String baseUrl = 'http://10.212.175.249:8080/api';
 
   CategoryPreferenceData _buildFoodTemplate() {
     return CategoryPreferenceData(

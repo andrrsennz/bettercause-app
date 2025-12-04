@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 import '../models/user_profile_model.dart';
 
 class ProfileService {
-  static const String baseUrl = 'http://10.0.2.2:8080/api';
+  static const String baseUrl = 'http://10.212.175.249:8080/api';
 
   Future<UserProfile> getUserProfile(String userId) async {
     final url = Uri.parse('$baseUrl/users/$userId/profile');

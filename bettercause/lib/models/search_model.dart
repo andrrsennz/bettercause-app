@@ -167,72 +167,444 @@ class Product {
     };
   }
 
-  /// NEW: Build from Open Food Facts product JSON
+  /// NEW: Build from Open Food Facts product JSON using API v2
+  /// This properly extracts nutrient_levels, additives, and all quality indicators
   factory Product.fromOpenFoodFacts(Map<String, dynamic> json) {
-    // ID / code
+    // ========= BASIC INFO =========
     final String id = (json['id'] ?? json['code'] ?? '').toString();
 
-    // Name
     final String name = (json['product_name'] ??
             json['product_name_en'] ??
             'Unknown product')
         .toString()
         .trim();
 
-    // Brand (first brand only)
     String brand = (json['brands'] ?? '').toString().trim();
     if (brand.contains(',')) {
       brand = brand.split(',').first.trim();
     }
     if (brand.isEmpty) brand = 'Unknown brand';
 
-    // Image
-    String imageUrl =
-        (json['image_front_url'] ?? json['image_url'] ?? '').toString();
+    // Image - prioritize high quality
+    String imageUrl = '';
+    if (json['selected_images'] != null && json['selected_images']['front'] != null) {
+      imageUrl = (json['selected_images']['front']['display']?['en'] ?? 
+                 json['selected_images']['front']['display']?['fr'] ?? 
+                 json['selected_images']['front']['small']?['en'] ?? '').toString();
+    }
     if (imageUrl.isEmpty) {
-      final selected =
-          json['selected_images']?['front']?['display']?['en']?.toString();
-      if (selected != null) {
-        imageUrl = selected;
+      imageUrl = (json['image_front_url'] ?? json['image_url'] ?? '').toString();
+    }
+
+    // ========= SCORES =========
+    String score = (json['nutriscore_grade'] ?? '').toString();
+    if (score.isNotEmpty && score != 'unknown') {
+      score = score.toUpperCase();
+    } else {
+      score = '';
+    }
+
+    final String ecoScoreGrade = (json['ecoscore_grade'] ?? '').toString().toUpperCase();
+    final bool isEcoFriendly = ['A', 'B'].contains(ecoScoreGrade);
+
+    // ========= CATEGORY =========
+    final List<dynamic> categoriesTags = (json['categories_tags'] as List<dynamic>? ?? []);
+    final String category = _mapOffCategoriesToAppCategory(categoriesTags);
+
+    // ========= NUTRIMENTS (per 100g) =========
+    final nutriments = json['nutriments'] as Map<String, dynamic>? ?? {};
+    final int calories = _toInt(nutriments['energy-kcal_100g']);
+    final double protein = _toDouble(nutriments['proteins_100g']);
+    final double fat = _toDouble(nutriments['fat_100g']);
+    final double sugar = _toDouble(nutriments['sugars_100g']);
+    final double sodium = _toDouble(nutriments['sodium_100g']); // in mg
+    final double fiber = _toDouble(nutriments['fiber_100g']);
+    final double saturatedFat = _toDouble(nutriments['saturated-fat_100g']);
+    final double salt = _toDouble(nutriments['salt_100g']); // in g
+
+    // ========= NUTRIENT LEVELS (FROM API - the key to good vs bad) =========
+    final nutrientLevels = json['nutrient_levels'] as Map<String, dynamic>? ?? {};
+    // Possible values: "low", "moderate", "high"
+
+    // ========= LABELS & CERTIFICATIONS =========
+    final List<dynamic> labelsTags = (json['labels_tags'] as List<dynamic>? ?? []);
+    final List<dynamic> ingredientsAnalysis = (json['ingredients_analysis_tags'] as List<dynamic>? ?? []);
+    
+    final bool isVegan = labelsTags.contains('en:vegan') || ingredientsAnalysis.contains('en:vegan');
+    final bool isVegetarian = labelsTags.contains('en:vegetarian') || ingredientsAnalysis.contains('en:vegetarian');
+    final bool isPalmOilFree = ingredientsAnalysis.contains('en:palm-oil-free');
+
+    // ========= ADDITIVES (FROM API) =========
+    final List<dynamic> additivesTags = json['additives_tags'] as List<dynamic>? ?? [];
+    final int additivesN = _toInt(json['additives_n']);
+
+    // ========= NOVA GROUP (Ultra-processing) =========
+    final int novaGroup = _toInt(json['nova_group']);
+    // 1 = unprocessed, 2 = processed ingredients, 3 = processed, 4 = ultra-processed
+
+    // ========= INGREDIENTS =========
+    final List<ProductIngredient> ingredients = [];
+    final List<dynamic> ingredientsList = json['ingredients'] as List<dynamic>? ?? [];
+    
+    for (var ing in ingredientsList.take(15)) {
+      if (ing is Map<String, dynamic>) {
+        final ingText = (ing['text'] ?? ing['id'] ?? '').toString().trim();
+        if (ingText.isEmpty) continue;
+        
+        String status = 'normal';
+        
+        // Check vegan/vegetarian status
+        if (ing['vegan'] == 'no' || ing['vegetarian'] == 'no') {
+          status = 'reduced';
+        } else if (ing['vegan'] == 'maybe' || ing['vegetarian'] == 'maybe') {
+          status = 'monitored';
+        }
+        
+        // Check if it's an additive
+        if (ingText.toLowerCase().startsWith('e') && 
+            RegExp(r'e[0-9]').hasMatch(ingText.toLowerCase())) {
+          status = 'monitored';
+        }
+        
+        ingredients.add(ProductIngredient(
+          name: ingText,
+          status: status,
+          subIngredients: const [],
+        ));
       }
     }
 
-    // NutriScore
-    String score = (json['nutriscore_grade'] ?? '').toString();
-    if (score.isNotEmpty && score != 'unknown') {
-      score = score.toUpperCase(); // "a" -> "A"
-    } else {
-      score = ''; // will render as grey bars
+    // ========= BUILD POSITIVES (FROM API DATA) =========
+    final List<ProductNutrient> positives = [];
+
+    // Low nutrient levels (good)
+    if (nutrientLevels['fat'] == 'low') {
+      positives.add(ProductNutrient(
+        name: 'Low Fat',
+        icon: '✓',
+        value: '${fat.toStringAsFixed(1)}g per 100g',
+      ));
+    }
+    
+    if (nutrientLevels['saturated-fat'] == 'low') {
+      positives.add(ProductNutrient(
+        name: 'Low Saturated Fat',
+        icon: '✓',
+        value: '${saturatedFat.toStringAsFixed(1)}g per 100g',
+      ));
+    }
+    
+    if (nutrientLevels['sugars'] == 'low') {
+      positives.add(ProductNutrient(
+        name: 'Low Sugar',
+        icon: '✓',
+        value: '${sugar.toStringAsFixed(1)}g per 100g',
+      ));
+    }
+    
+    if (nutrientLevels['salt'] == 'low') {
+      positives.add(ProductNutrient(
+        name: 'Low Salt',
+        icon: '✓',
+        value: '${salt.toStringAsFixed(2)}g per 100g',
+      ));
     }
 
-    // Very rough category mapping for emoji & filters
-    final List<dynamic> categoriesTags =
-        (json['categories_tags'] as List<dynamic>? ?? []);
-    final String category = _mapOffCategoriesToAppCategory(categoriesTags);
+    // High fiber (good)
+    if (fiber >= 6.0) {
+      positives.add(ProductNutrient(
+        name: 'High Fiber',
+        icon: '🌾',
+        value: '${fiber.toStringAsFixed(1)}g per 100g',
+      ));
+    } else if (fiber >= 3.0) {
+      positives.add(ProductNutrient(
+        name: 'Source of Fiber',
+        icon: '🌾',
+        value: '${fiber.toStringAsFixed(1)}g per 100g',
+      ));
+    }
 
-    // Nutriments
-    final nutriments = json['nutriments'] as Map<String, dynamic>? ?? {};
-    final int calories = _toInt(nutriments['energy-kcal_100g'] ??
-        nutriments['energy-kcal_serving'] ??
-        nutriments['energy-kcal']);
-    final double protein =
-        _toDouble(nutriments['proteins_100g'] ?? nutriments['proteins_serving']);
-    final double fat =
-        _toDouble(nutriments['fat_100g'] ?? nutriments['fat_serving']);
+    // High protein (good)
+    if (protein >= 12.0) {
+      positives.add(ProductNutrient(
+        name: 'High Protein',
+        icon: '💪',
+        value: '${protein.toStringAsFixed(1)}g per 100g',
+      ));
+    } else if (protein >= 6.0) {
+      positives.add(ProductNutrient(
+        name: 'Source of Protein',
+        icon: '💪',
+        value: '${protein.toStringAsFixed(1)}g per 100g',
+      ));
+    }
 
-    // Added / modified date
+    // Dietary preferences
+    if (isVegan) {
+      positives.add(ProductNutrient(
+        name: 'Vegan',
+        icon: '🌱',
+        value: 'Certified',
+      ));
+    } else if (isVegetarian) {
+      positives.add(ProductNutrient(
+        name: 'Vegetarian',
+        icon: '🥬',
+        value: 'Certified',
+      ));
+    }
+
+    if (isPalmOilFree) {
+      positives.add(ProductNutrient(
+        name: 'Palm Oil Free',
+        icon: '🌴',
+        value: 'Yes',
+      ));
+    }
+
+    // Certifications
+    if (labelsTags.contains('en:organic') || labelsTags.contains('en:eu-organic')) {
+      positives.add(ProductNutrient(
+        name: 'Organic',
+        icon: '🍃',
+        value: 'Certified',
+      ));
+    }
+
+    if (labelsTags.contains('en:fair-trade')) {
+      positives.add(ProductNutrient(
+        name: 'Fair Trade',
+        icon: '⚖️',
+        value: 'Certified',
+      ));
+    }
+
+    // No or few additives
+    if (additivesN == 0) {
+      positives.add(ProductNutrient(
+        name: 'No Additives',
+        icon: '✓',
+        value: 'Clean Label',
+      ));
+    }
+
+    // Minimal processing
+    if (novaGroup <= 2) {
+      positives.add(ProductNutrient(
+        name: 'Minimally Processed',
+        icon: '✓',
+        value: 'NOVA Group $novaGroup',
+      ));
+    }
+
+    // ========= BUILD NEGATIVES (FROM API DATA) =========
+    final List<ProductNutrient> negatives = [];
+
+    // High nutrient levels (bad)
+    if (nutrientLevels['fat'] == 'high') {
+      negatives.add(ProductNutrient(
+        name: 'High Fat',
+        icon: '⚠️',
+        value: '${fat.toStringAsFixed(1)}g per 100g',
+        details: ['Exceeds 17.5g per 100g'],
+      ));
+    } else if (nutrientLevels['fat'] == 'moderate') {
+      negatives.add(ProductNutrient(
+        name: 'Moderate Fat',
+        icon: '⚠️',
+        value: '${fat.toStringAsFixed(1)}g per 100g',
+        details: ['Between 3g and 17.5g per 100g'],
+      ));
+    }
+    
+    if (nutrientLevels['saturated-fat'] == 'high') {
+      negatives.add(ProductNutrient(
+        name: 'High Saturated Fat',
+        icon: '⚠️',
+        value: '${saturatedFat.toStringAsFixed(1)}g per 100g',
+        details: ['Exceeds 5g per 100g', 'May increase cholesterol'],
+      ));
+    } else if (nutrientLevels['saturated-fat'] == 'moderate') {
+      negatives.add(ProductNutrient(
+        name: 'Moderate Saturated Fat',
+        icon: '⚠️',
+        value: '${saturatedFat.toStringAsFixed(1)}g per 100g',
+        details: ['Between 1.5g and 5g per 100g'],
+      ));
+    }
+    
+    if (nutrientLevels['sugars'] == 'high') {
+      negatives.add(ProductNutrient(
+        name: 'High Sugar',
+        icon: '⚠️',
+        value: '${sugar.toStringAsFixed(1)}g per 100g',
+        details: ['Exceeds 22.5g per 100g'],
+      ));
+    } else if (nutrientLevels['sugars'] == 'moderate') {
+      negatives.add(ProductNutrient(
+        name: 'Moderate Sugar',
+        icon: '⚠️',
+        value: '${sugar.toStringAsFixed(1)}g per 100g',
+        details: ['Between 5g and 22.5g per 100g'],
+      ));
+    }
+    
+    if (nutrientLevels['salt'] == 'high') {
+      negatives.add(ProductNutrient(
+        name: 'High Salt',
+        icon: '⚠️',
+        value: '${salt.toStringAsFixed(2)}g per 100g',
+        details: ['Exceeds 1.5g per 100g'],
+      ));
+    } else if (nutrientLevels['salt'] == 'moderate') {
+      negatives.add(ProductNutrient(
+        name: 'Moderate Salt',
+        icon: '⚠️',
+        value: '${salt.toStringAsFixed(2)}g per 100g',
+        details: ['Between 0.3g and 1.5g per 100g'],
+      ));
+    }
+
+    // Additives
+    if (additivesN > 0) {
+      final List<String> additiveDetails = [];
+      for (var additive in additivesTags.take(5)) {
+        String additiveName = additive.toString()
+            .replaceAll('en:', '')
+            .replaceAll('-', ' ')
+            .split(':')
+            .last
+            .trim();
+        if (additiveName.isNotEmpty) {
+          additiveDetails.add(additiveName);
+        }
+      }
+      
+      negatives.add(ProductNutrient(
+        name: additivesN == 1 ? 'Contains Additive' : 'Contains Additives',
+        icon: '⚠️',
+        value: '$additivesN found',
+        details: additiveDetails.isNotEmpty ? additiveDetails : null,
+      ));
+    }
+
+    // Palm oil
+    if (ingredientsAnalysis.contains('en:palm-oil')) {
+      negatives.add(ProductNutrient(
+        name: 'Contains Palm Oil',
+        icon: '🌴',
+        value: 'Yes',
+        details: ['Associated with deforestation'],
+      ));
+    }
+
+    // Ultra-processed
+    if (novaGroup == 4) {
+      negatives.add(ProductNutrient(
+        name: 'Ultra-Processed',
+        icon: '⚠️',
+        value: 'NOVA Group 4',
+        details: ['Highly processed food product'],
+      ));
+    }
+
+    // ========= DESCRIPTION =========
+    String description = (json['generic_name_en'] ?? json['generic_name'] ?? '').toString();
+    if (description.isEmpty) {
+      description = (json['categories'] ?? '').toString();
+    }
+    if (description.isEmpty) {
+      description = 'Product from Open Food Facts database';
+    }
+
+    // ========= CERTIFICATIONS =========
+    final List<String> certifications = [];
+    if (score.isNotEmpty) certifications.add('nutriscore-${score.toLowerCase()}');
+    if (ecoScoreGrade.isNotEmpty) certifications.add('ecoscore-${ecoScoreGrade.toLowerCase()}');
+    if (labelsTags.contains('en:organic') || labelsTags.contains('en:eu-organic')) {
+      certifications.add('organic');
+    }
+    if (labelsTags.contains('en:fair-trade')) certifications.add('fair-trade');
+    if (labelsTags.contains('en:gluten-free')) certifications.add('gluten-free');
+    if (isVegan) certifications.add('vegan');
+    if (labelsTags.contains('en:palm-oil-free')) certifications.add('palm-oil-free');
+
+    // ========= ETHICS SCORE (0-100) =========
+    int ethicsScore = 50;
+    
+    // Eco score impact
+    switch (ecoScoreGrade) {
+      case 'A': ethicsScore += 20; break;
+      case 'B': ethicsScore += 10; break;
+      case 'D': ethicsScore -= 10; break;
+      case 'E': ethicsScore -= 20; break;
+    }
+    
+    // Dietary ethics
+    if (isVegan) ethicsScore += 15;
+    else if (isVegetarian) ethicsScore += 10;
+    
+    // Labor & production ethics
+    if (labelsTags.contains('en:fair-trade')) ethicsScore += 15;
+    if (labelsTags.contains('en:organic')) ethicsScore += 10;
+    
+    // Environmental concerns
+    if (!isPalmOilFree && ingredientsAnalysis.contains('en:palm-oil')) ethicsScore -= 15;
+    if (additivesN > 5) ethicsScore -= 5;
+    if (novaGroup == 4) ethicsScore -= 5;
+    
+    ethicsScore = ethicsScore.clamp(0, 100);
+
+    // ========= ENVIRONMENTAL IMPACT =========
+    String environmentalImpact = 'N/A';
+    if (ecoScoreGrade.isNotEmpty) {
+      switch (ecoScoreGrade) {
+        case 'A': environmentalImpact = 'Very Low Impact'; break;
+        case 'B': environmentalImpact = 'Low Impact'; break;
+        case 'C': environmentalImpact = 'Moderate Impact'; break;
+        case 'D': environmentalImpact = 'High Impact'; break;
+        case 'E': environmentalImpact = 'Very High Impact'; break;
+      }
+    }
+
+    // ========= ANIMAL WELFARE =========
+    String animalWelfare = 'N/A';
+    if (isVegan) {
+      animalWelfare = 'Excellent - No Animal Products';
+    } else if (isVegetarian) {
+      animalWelfare = 'Good - No Meat';
+    } else if (categoriesTags.any((c) {
+      final tag = c.toString().toLowerCase();
+      return tag.contains('meat') || tag.contains('fish') || 
+             tag.contains('seafood') || tag.contains('poultry');
+    })) {
+      animalWelfare = 'Contains Animal Products';
+    }
+
+    // ========= FAIR LABOR =========
+    String fairLabor = 'N/A';
+    if (labelsTags.contains('en:fair-trade')) {
+      fairLabor = 'Fair Trade Certified';
+    }
+
+    // ========= IDEAL FOR =========
+    final List<String> idealFor = [];
+    if (isVegan) idealFor.add('Vegans');
+    if (isVegetarian && !isVegan) idealFor.add('Vegetarians');
+    if (nutrientLevels['sugars'] == 'low') idealFor.add('Low Sugar Diet');
+    if (fiber >= 6.0) idealFor.add('High Fiber Diet');
+    if (protein >= 12.0) idealFor.add('High Protein Diet');
+    if (nutrientLevels['salt'] == 'low') idealFor.add('Low Sodium Diet');
+    if (labelsTags.contains('en:gluten-free')) idealFor.add('Gluten-Free');
+    if (labelsTags.contains('en:lactose-free')) idealFor.add('Lactose-Free');
+    if (novaGroup <= 2) idealFor.add('Whole Food Diet');
+
+    // ========= DATE =========
     final int lastModified = _toInt(json['last_modified_t'] ?? json['created_t']);
     final addedDate = lastModified > 0
         ? DateTime.fromMillisecondsSinceEpoch(lastModified * 1000)
         : DateTime.now();
-
-    // Very rough vegan detection (optional)
-    final List<dynamic> labelsTags =
-        (json['labels_tags'] as List<dynamic>? ?? []);
-    final List<dynamic> ingredientsAnalysis =
-        (json['ingredients_analysis_tags'] as List<dynamic>? ?? []);
-    final bool isVegan =
-        labelsTags.contains('en:vegan') || ingredientsAnalysis.contains('en:vegan');
 
     return Product(
       id: id.isEmpty ? 'unknown' : id,
@@ -241,24 +613,24 @@ class Product {
       imageUrl: imageUrl,
       category: category,
       nutritionScore: score,
-      price: 0.0, // OFF doesn't give price
+      price: 0.0,
       addedDate: addedDate,
       isVegan: isVegan,
-      isEcoFriendly: false, // we can improve later using ecoscore
-      matchPercentage: 0, // later your AI can compute this
-      description: json['generic_name_en']?.toString() ?? '',
-      idealFor: const [],
+      isEcoFriendly: isEcoFriendly,
+      matchPercentage: 0,
+      description: description,
+      idealFor: idealFor,
       calories: calories,
       protein: protein,
       fat: fat,
-      ethicsScore: 0,
-      environmentalImpact: 'N/A',
-      animalWelfare: 'N/A',
-      fairLabor: 'N/A',
-      ingredients: const [],
-      positives: const [],
-      negatives: const [],
-      certifications: const [],
+      ethicsScore: ethicsScore,
+      environmentalImpact: environmentalImpact,
+      animalWelfare: animalWelfare,
+      fairLabor: fairLabor,
+      ingredients: ingredients,
+      positives: positives,
+      negatives: negatives,
+      certifications: certifications,
       alternatives: const [],
     );
   }
@@ -272,7 +644,7 @@ class Product {
     if (containsAny(['beverages', 'drinks', 'juices', 'sodas'])) {
       return 'beverages';
     }
-    if (containsAny(['chocolate', 'sweets', 'confectionery', 'biscuits'])) {
+    if (containsAny(['chocolate', 'sweets', 'confectionery', 'biscuits', 'candies'])) {
       return 'sweets';
     }
     if (containsAny(['dairies', 'cheeses', 'milk-products', 'yogurts'])) {
@@ -301,7 +673,7 @@ class Product {
 
 class ProductIngredient {
   final String name;
-  final String status; // 'reduced', 'monitored', etc.
+  final String status; // 'reduced', 'monitored', 'normal'
   final List<String> subIngredients;
 
   ProductIngredient({

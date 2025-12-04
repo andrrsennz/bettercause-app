@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class AuthService {
-  static const String _baseUrlAndroid = 'http://10.0.2.2:8080/api/auth';
+  static const String _baseUrlAndroid = 'http://10.212.175.249:8080/api/auth';
   static const String _baseUrliOS = 'http://localhost:8080/api/auth';
 
   final _storage = const FlutterSecureStorage();
