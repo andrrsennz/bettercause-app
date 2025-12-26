@@ -8,8 +8,12 @@ import 'screens/onboarding/onboarding_flow_screen';
 import 'services/onboarding_service.dart';
 import 'screens/main_navigation_screen.dart';
 import 'providers/auth_provider.dart';
+import 'package:flutter_gemini/flutter_gemini.dart';
+
+const apiKey = 'AIzaSyBTuoYBtnAUoYZ_GmDQqT7r0xphgZcarNQ';
 
 void main() {
+  
   WidgetsFlutterBinding.ensureInitialized();
   
   // Set preferred orientations
@@ -17,6 +21,7 @@ void main() {
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);
+  Gemini.init(apiKey: apiKey);
   
   runApp(const MyApp());
 }

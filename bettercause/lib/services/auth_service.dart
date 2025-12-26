@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class AuthService {
-  static const String _baseUrlAndroid = 'http://10.212.175.249:8080/api/auth';
+  static const String _baseUrlAndroid = 'http://10.229.30.249:8080/api/auth';
   static const String _baseUrliOS = 'http://localhost:8080/api/auth';
 
   final _storage = const FlutterSecureStorage();
@@ -35,12 +35,14 @@ class AuthService {
     final data = jsonDecode(res.body);
 
     if (res.statusCode == 201) {
-      await _storage.write(key: "token", value: data['token']);
-      await _storage.write(key: "userId", value: data['userId']);
-      await _storage.write(key: "name", value: data['name']);
-      await _storage.write(key: "email", value: data['email']);
-      return data;
-    }
+  await _storage.write(key: "token", value: data['token']);
+  await _storage.write(key: "userId", value: data['userId']);   // existing
+  await _storage.write(key: "user_id", value: data['userId']);  // NEW: snake_case for compatibility
+  await _storage.write(key: "name", value: data['name']);
+  await _storage.write(key: "email", value: data['email']);
+  return data;
+}
+
 
     throw Exception(data["message"]);
   }
@@ -63,12 +65,14 @@ class AuthService {
     final data = jsonDecode(res.body);
 
     if (res.statusCode == 200) {
-      await _storage.write(key: "token", value: data['token']);
-      await _storage.write(key: "userId", value: data['userId']);
-      await _storage.write(key: "name", value: data['name']);
-      await _storage.write(key: "email", value: data['email']);
-      return data;
-    }
+  await _storage.write(key: "token", value: data['token']);
+  await _storage.write(key: "userId", value: data['userId']);   // existing
+  await _storage.write(key: "user_id", value: data['userId']);  // NEW
+  await _storage.write(key: "name", value: data['name']);
+  await _storage.write(key: "email", value: data['email']);
+  return data;
+}
+
 
     throw Exception(data["message"]);
   }

@@ -9,7 +9,7 @@ class Product {
   final String nutritionScore;
   final double price;
   final DateTime addedDate;
-
+  final Map<String, dynamic>? rawApiData;
   // Detail fields
   final bool isVegan;
   final bool isEcoFriendly;
@@ -28,6 +28,7 @@ class Product {
   final List<ProductNutrient> negatives;
   final List<String> certifications;
   final List<Product> alternatives;
+  
 
   Product({
     required this.id,
@@ -55,6 +56,7 @@ class Product {
     this.negatives = const [],
     this.certifications = const [],
     this.alternatives = const [],
+    this.rawApiData,
   });
 
   Product copyWith({
@@ -83,6 +85,7 @@ class Product {
     List<ProductNutrient>? negatives,
     List<String>? certifications,
     List<Product>? alternatives,
+    Map<String, dynamic>? rawApiData,
   }) {
     return Product(
       id: id ?? this.id,
@@ -110,6 +113,7 @@ class Product {
       negatives: negatives ?? this.negatives,
       certifications: certifications ?? this.certifications,
       alternatives: alternatives ?? this.alternatives,
+      rawApiData: rawApiData ?? this.rawApiData,
     );
   }
 
@@ -632,6 +636,7 @@ class Product {
       negatives: negatives,
       certifications: certifications,
       alternatives: const [],
+      rawApiData: json,
     );
   }
 
