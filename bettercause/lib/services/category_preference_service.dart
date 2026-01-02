@@ -5,7 +5,7 @@ import '../models/category_preference_model.dart';
 import '../utils/category_key_mapper.dart';
 
 class CategoryPreferenceService {
-  static const String baseUrl = 'http://10.229.30.249:8080/api';
+  static const String baseUrl = 'https://englacial-joelle-nondichogamic.ngrok-free.dev/api';
 
   CategoryPreferenceData _buildFoodTemplate() {
     return CategoryPreferenceData(

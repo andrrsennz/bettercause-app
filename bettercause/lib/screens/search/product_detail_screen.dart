@@ -8,6 +8,7 @@ import '../../models/user_preferences_model.dart';
 import '../../models/matching_result_model.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_gemini/flutter_gemini.dart';
 
 
 class ProductDetailScreen extends StatefulWidget {
@@ -24,6 +25,39 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   Product? _product;
   bool _isLoading = true;
   final ProductHistoryService _history = ProductHistoryService();
+
+  final Gemini gemini = Gemini.instance;
+  bool _isLoadingAI = false;
+  String _aiAnalysis = '';
+  String? _aiError;
+
+  // Add these after your existing state variables
+String _aiVerdict = ''; // Will be 'RECOMMENDED', 'BUY WITH CAUTION', or 'NOT RECOMMENDED'
+Color _getVerdictColor(String verdict) {
+  switch (verdict.toUpperCase()) {
+    case 'RECOMMENDED':
+      return const Color(0xFF4CAF50); // Green
+    case 'BUY WITH CAUTION':
+      return const Color(0xFFFFA726); // Orange
+    case 'NOT RECOMMENDED':
+      return const Color(0xFFFF4444); // Red
+    default:
+      return const Color(0xFF6B4CE6); // Purple (analyzing)
+  }
+}
+
+IconData _getVerdictIcon(String verdict) {
+  switch (verdict.toUpperCase()) {
+    case 'RECOMMENDED':
+      return Icons.check_circle;
+    case 'BUY WITH CAUTION':
+      return Icons.warning;
+    case 'NOT RECOMMENDED':
+      return Icons.cancel;
+    default:
+      return Icons.psychology;
+  }
+}
 
   final ProfileService _profileService = ProfileService();
   final _storage = const FlutterSecureStorage();
@@ -42,8 +76,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     case 'Very Poor':
       return const Color(0xFFFF4444);
     default:
-      return const Color(0xFFE8E3FF);
+      return const Color.fromARGB(255, 108, 106, 117);
   }
+
+  
 }
 
   @override
@@ -51,6 +87,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     super.initState();
     _loadProduct();
   }
+
 
 Future<void> _loadProduct() async {
   setState(() => _isLoading = true);
@@ -100,6 +137,8 @@ Future<void> _loadProduct() async {
       _matchingResult = matchingResult;
       _isLoading = false;
     });
+
+    _loadAIAnalysis();
 
     // Add to history
     if (product != null) {
@@ -398,9 +437,261 @@ Future<void> _loadProduct() async {
         SnackBar(content: Text('Failed to open marketplace: $e')),
       );
     }
+  }Future<void> _loadAIAnalysis() async {
+  if (_product == null) return;
+  
+  setState(() {
+    _isLoadingAI = true;
+    _aiError = null;
+    _aiVerdict = '';
+  });
+
+  try {
+    final userId = await _storage.read(key: 'userId')
+        ?? await _storage.read(key: 'user_id');
+    
+    UserPreferences? userPrefs;
+    if (userId != null && userId.isNotEmpty) {
+      try {
+        userPrefs = await _profileService.getUserPreferences(userId);
+      } catch (e) {
+        print('⚠️ [AI] Could not fetch user preferences: $e');
+      }
+    }
+
+    final prompt = _buildAIPrompt(_product!, userPrefs);
+    
+    print('🤖 [AI] Sending prompt to Gemini...');
+    
+    final response = await gemini.text(prompt);
+    
+    if (mounted) {
+      final analysis = response?.output ?? 'Unable to generate analysis.';
+      
+      // ✅ PARSE THE VERDICT
+      String verdict = '';
+      final analysisUpper = analysis.toUpperCase();
+      
+      if (analysisUpper.startsWith('NOT RECOMMENDED')) {
+        verdict = 'NOT RECOMMENDED';
+      } else if (analysisUpper.startsWith('BUY WITH CAUTION')) {
+        verdict = 'BUY WITH CAUTION';
+      } else if (analysisUpper.startsWith('RECOMMENDED')) {
+        verdict = 'RECOMMENDED';
+      }
+      
+      setState(() {
+        _aiAnalysis = analysis;
+        _aiVerdict = verdict;
+        _isLoadingAI = false;
+      });
+      
+      print('✅ [AI] Analysis generated: VERDICT = $verdict');
+    }
+  } catch (e) {
+    print('❌ [AI] Error: $e');
+    if (mounted) {
+      setState(() {
+        _aiError = 'Failed to generate AI analysis';
+        _isLoadingAI = false;
+      });
+    }
   }
+}
 
-
+String _buildAIPrompt(Product product, UserPreferences? userPrefs) {
+  final buffer = StringBuffer();
+  
+  buffer.writeln('You are a decisive Personal Shopping Companion AI assistant.');
+  buffer.writeln('Your job is to give a CLEAR recommendation: RECOMMENDED, BUY WITH CAUTION, or NOT RECOMMENDED.');
+  buffer.writeln();
+  
+  // PRODUCT INFORMATION
+  buffer.writeln('=== PRODUCT INFORMATION ===');
+  buffer.writeln('Name: ${product.name}');
+  buffer.writeln('Brand: ${product.brand}');
+  buffer.writeln('Category: ${product.category}');
+  
+  if (product.description.isNotEmpty) {
+    buffer.writeln('Description: ${product.description}');
+  }
+  
+  // Vegan/Vegetarian status
+  if (product.isVegan) {
+    buffer.writeln('✓ VEGAN PRODUCT');
+  }
+  
+  // Ingredients
+  if (product.ingredients.isNotEmpty) {
+    buffer.writeln();
+    buffer.writeln('INGREDIENTS:');
+    final allIngredients = product.ingredients.map((i) => i.name).join(', ');
+    buffer.writeln(allIngredients);
+  }
+  
+  // Nutrition
+  if (product.calories > 0) {
+    buffer.writeln();
+    buffer.writeln('NUTRITION (per 100g):');
+    buffer.writeln('- Calories: ${product.calories}');
+    buffer.writeln('- Protein: ${product.protein}g');
+    buffer.writeln('- Fat: ${product.fat}g');
+  }
+  
+  // Nutrient Levels (CRITICAL for health conditions)
+  if (product.rawApiData != null) {
+    final nutrientLevels = product.rawApiData!['nutrient_levels'] as Map<String, dynamic>?;
+    if (nutrientLevels != null && nutrientLevels.isNotEmpty) {
+      buffer.writeln();
+      buffer.writeln('NUTRIENT LEVELS:');
+      nutrientLevels.forEach((key, value) {
+        buffer.writeln('- ${key}: ${value.toString().toUpperCase()}');
+      });
+    }
+    
+    final ecoScore = product.rawApiData!['ecoscore_grade']?.toString() ?? '';
+    if (ecoScore.isNotEmpty && ecoScore != 'UNKNOWN') {
+      buffer.writeln('- EcoScore: ${ecoScore.toUpperCase()}');
+    }
+  }
+  
+  // Scores
+  if (product.nutritionScore.isNotEmpty && product.nutritionScore != 'UNKNOWN') {
+    buffer.writeln('- NutriScore: ${product.nutritionScore}');
+  }
+  
+  buffer.writeln();
+  buffer.writeln('===================');
+  buffer.writeln();
+  
+  // USER PROFILE - THIS IS CRITICAL!
+  if (userPrefs != null && (userPrefs.hasPreferences || userPrefs.hasAvoidList || userPrefs.hasHealthConditions)) {
+    buffer.writeln('=== USER PROFILE ===');
+    
+    // ALLERGENS & INGREDIENTS TO AVOID (HIGHEST PRIORITY!)
+    if (userPrefs.avoidIngredients.isNotEmpty) {
+      buffer.writeln();
+      buffer.writeln('⚠️ USER MUST AVOID THESE INGREDIENTS (ALLERGENS/SENSITIVITIES):');
+      for (var ingredient in userPrefs.avoidIngredients) {
+        buffer.writeln('- ${ingredient.toUpperCase()}');
+      }
+      buffer.writeln();
+      buffer.writeln('CRITICAL INSTRUCTION: If the product name OR ingredients list contains ANY of these avoided ingredients, you MUST say "NOT RECOMMENDED" immediately. Be strict about this!');
+      buffer.writeln();
+    }
+    
+    // DIETARY PREFERENCES (SECOND PRIORITY)
+    if (userPrefs.preferenceTags.isNotEmpty) {
+      buffer.writeln();
+      buffer.writeln('USER DIETARY PREFERENCES:');
+      for (var tag in userPrefs.preferenceTags) {
+        buffer.writeln('- $tag');
+      }
+      
+      // Special handling for strict diets
+      final strictVegan = userPrefs.preferenceTags.any((t) => 
+        t.toLowerCase().contains('vegan'));
+      final strictVegetarian = userPrefs.preferenceTags.any((t) => 
+        t.toLowerCase().contains('vegetarian') && !t.toLowerCase().contains('vegan'));
+      
+      if (strictVegan) {
+        buffer.writeln();
+        buffer.writeln('⚠️ USER IS VEGAN: Product must contain NO animal products (meat, dairy, eggs, honey, etc.)');
+        buffer.writeln('If this product contains ANY animal-derived ingredients, say "NOT RECOMMENDED".');
+      } else if (strictVegetarian) {
+        buffer.writeln();
+        buffer.writeln('⚠️ USER IS VEGETARIAN: Product must contain NO meat, fish, or poultry.');
+        buffer.writeln('If this product contains meat, fish, or poultry, say "NOT RECOMMENDED".');
+      }
+      buffer.writeln();
+    }
+    
+    // HEALTH CONDITIONS (THIRD PRIORITY)
+    if (userPrefs.healthConditions.isNotEmpty) {
+      buffer.writeln();
+      buffer.writeln('USER HEALTH CONDITIONS:');
+      for (var condition in userPrefs.healthConditions) {
+        buffer.writeln('- $condition');
+      }
+      buffer.writeln();
+      buffer.writeln('Check nutrient levels against these conditions:');
+      
+      final conditionsLower = userPrefs.healthConditions.map((c) => c.toLowerCase()).toList();
+      
+      if (conditionsLower.any((c) => c.contains('diabet'))) {
+        buffer.writeln('- Diabetes: Avoid HIGH sugar products');
+      }
+      if (conditionsLower.any((c) => c.contains('hypertension') || c.contains('blood pressure'))) {
+        buffer.writeln('- Hypertension: Avoid HIGH salt/sodium products');
+      }
+      if (conditionsLower.any((c) => c.contains('cholesterol') || c.contains('heart'))) {
+        buffer.writeln('- Heart/Cholesterol: Avoid HIGH saturated fat products');
+      }
+      if (conditionsLower.any((c) => c.contains('weight') || c.contains('obesity'))) {
+        buffer.writeln('- Weight management: Prefer low calorie, low fat options');
+      }
+      buffer.writeln();
+    }
+    
+    buffer.writeln('===================');
+    buffer.writeln();
+  }
+  
+  // TASK INSTRUCTIONS
+  buffer.writeln('=== YOUR TASK ===');
+  
+  if (userPrefs != null && (userPrefs.hasPreferences || userPrefs.hasAvoidList || userPrefs.hasHealthConditions)) {
+    buffer.writeln();
+    buffer.writeln('Analyze this product for THIS SPECIFIC USER following these STRICT RULES:');
+    buffer.writeln();
+    buffer.writeln('DECISION RULES (CHECK IN THIS ORDER):');
+    buffer.writeln();
+    buffer.writeln('1. ALLERGENS/AVOIDED INGREDIENTS (IMMEDIATE REJECTION):');
+    buffer.writeln('   - Check product name AND ingredients list');
+    buffer.writeln('   - If ANY avoided ingredient is present → Say "NOT RECOMMENDED" immediately');
+    buffer.writeln('   - Example: User avoids "nuts", product is "Peanut Butter" → NOT RECOMMENDED');
+    buffer.writeln('   - Example: User avoids "soy", ingredients contain "soy lecithin" → NOT RECOMMENDED');
+    buffer.writeln();
+    buffer.writeln('2. DIETARY RESTRICTIONS (STRICT ENFORCEMENT):');
+    buffer.writeln('   - If user is VEGAN and product contains ANY animal products → NOT RECOMMENDED');
+    buffer.writeln('   - If user is VEGETARIAN and product contains meat/fish → NOT RECOMMENDED');
+    buffer.writeln('   - Be strict! Even small amounts count.');
+    buffer.writeln();
+    buffer.writeln('3. HEALTH CONDITIONS (CRITICAL CONCERNS):');
+    buffer.writeln('   - Check nutrient levels against health conditions');
+    buffer.writeln('   - If product has HIGH levels of nutrients user should avoid → BUY WITH CAUTION or NOT RECOMMENDED');
+    buffer.writeln('   - Example: Diabetic user + HIGH sugar product → BUY WITH CAUTION or NOT RECOMMENDED');
+    buffer.writeln();
+    buffer.writeln('4. GENERAL FIT (IF NO CRITICAL ISSUES):');
+    buffer.writeln('   - If product passes all above checks → RECOMMENDED or BUY WITH CAUTION');
+    buffer.writeln('   - Consider nutritional quality and user preferences');
+    buffer.writeln();
+    buffer.writeln('OUTPUT FORMAT:');
+    buffer.writeln('Give a clear verdict in 3-5 sentences:');
+    buffer.writeln('- Start with: "RECOMMENDED", "BUY WITH CAUTION", or "NOT RECOMMENDED"');
+    buffer.writeln('- Explain WHY clearly and directly');
+    buffer.writeln('- Mention specific ingredients or nutrients of concern if any');
+    buffer.writeln('- Be honest and protective of the user\'s health');
+    buffer.writeln();
+    buffer.writeln('Example outputs:');
+    buffer.writeln('- "NOT RECOMMENDED. This product contains peanuts, which you must avoid due to your nut allergy. Even trace amounts can be dangerous."');
+    buffer.writeln('- "NOT RECOMMENDED. This product contains chicken, which conflicts with your vegan diet preference."');
+    buffer.writeln('- "BUY WITH CAUTION. This product has high sugar content (marked as HIGH), which may not be ideal for your diabetes management. Consider consuming in moderation."');
+    buffer.writeln('- "RECOMMENDED. This product aligns well with your dietary preferences and contains no ingredients you need to avoid. The nutritional profile is good."');
+  } else {
+    buffer.writeln();
+    buffer.writeln('No user preferences available. Provide a GENERAL health analysis:');
+    buffer.writeln();
+    buffer.writeln('1. Assess nutritional quality (NutriScore, nutrient levels)');
+    buffer.writeln('2. Identify any concerning ingredients (additives, high sugar/salt/fat)');
+    buffer.writeln('3. Suggest who would benefit from this product');
+    buffer.writeln('4. Note any general health concerns');
+    buffer.writeln();
+    buffer.writeln('Give your analysis in 3-5 clear sentences. Be informative and helpful.');
+  }
+  
+  return buffer.toString();
+}
 
   @override
   Widget build(BuildContext context) {
@@ -514,259 +805,313 @@ Future<void> _loadProduct() async {
 
             const SizedBox(height: 4),
 
-            // ========= MATCH PERCENTAGE =========
-            if (_matchingResult != null && !_matchingResult!.showScoreOnly)
-              _buildCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        RichText(
-                          text: TextSpan(
-                            style: const TextStyle(fontSize: 15),
-                            children: [
-                              TextSpan(
-                                text: '${_matchingResult!.totalScore.toStringAsFixed(0)}% ',
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold, color: Colors.black),
-                              ),
-                              const TextSpan(
-                                  text: 'AI Match Score',
-                                  style: TextStyle(color: Colors.black)),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                              color: _getCategoryColor(_matchingResult!.category),
-                              borderRadius: BorderRadius.circular(14)),
-                          child: Text(_matchingResult!.category,
-                              style: const TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w600)),
-                        ),
-                      ],
-                    ),
-                    if (_matchingResult!.confidenceLabel != null) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        _matchingResult!.confidenceLabel!,
-                        style: const TextStyle(fontSize: 11, color: Colors.orange),
-                      ),
-                    ],
-                    if (_matchingResult!.breakdown.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      const Text('Score Breakdown',
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 8),
-                      ..._matchingResult!.breakdown.entries.map((entry) => Padding(
-                            padding: const EdgeInsets.only(bottom: 6.0),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(entry.key,
-                                    style:
-                                        const TextStyle(fontSize: 12, color: Colors.grey)),
-                                Text('${entry.value.toStringAsFixed(0)}%',
-                                    style: const TextStyle(
-                                        fontSize: 12, fontWeight: FontWeight.w600)),
-                              ],
-                            ),
-                          )),
-                    ],
-                  ],
-                ),
-              ),
+            // // ========= MATCH PERCENTAGE =========
+            // if (_matchingResult != null && !_matchingResult!.showScoreOnly)
+            //   _buildCard(
+            //     child: Column(
+            //       crossAxisAlignment: CrossAxisAlignment.start,
+            //       children: [
+            //         Row(
+            //           mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            //           children: [
+            //             RichText(
+            //               text: TextSpan(
+            //                 style: const TextStyle(fontSize: 15),
+            //                 children: [
+            //                   TextSpan(
+            //                     text: '${_matchingResult!.totalScore.toStringAsFixed(0)}% ',
+            //                     style: const TextStyle(
+            //                         fontWeight: FontWeight.bold, color: Colors.black),
+            //                   ),
+            //                   const TextSpan(
+            //                       text: 'AI Match Score',
+            //                       style: TextStyle(color: Colors.black)),
+            //                 ],
+            //               ),
+            //             ),
+            //             Container(
+            //               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            //               decoration: BoxDecoration(
+            //                   color: _getCategoryColor(_matchingResult!.category),
+            //                   borderRadius: BorderRadius.circular(14)),
+            //               child: Text(_matchingResult!.category,
+            //                   style: const TextStyle(
+            //                       fontSize: 11,
+            //                       color: Colors.white,
+            //                       fontWeight: FontWeight.w600)),
+            //             ),
+            //           ],
+            //         ),
+            //         if (_matchingResult!.confidenceLabel != null) ...[
+            //           const SizedBox(height: 8),
+            //           Text(
+            //             _matchingResult!.confidenceLabel!,
+            //             style: const TextStyle(fontSize: 11, color: Colors.orange),
+            //           ),
+            //         ],
+            //         if (_matchingResult!.breakdown.isNotEmpty) ...[
+            //           const SizedBox(height: 12),
+            //           const Text('Score Breakdown',
+            //               style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+            //           const SizedBox(height: 8),
+            //           ..._matchingResult!.breakdown.entries.map((entry) => Padding(
+            //                 padding: const EdgeInsets.only(bottom: 6.0),
+            //                 child: Row(
+            //                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            //                   children: [
+            //                     Text(entry.key,
+            //                         style:
+            //                             const TextStyle(fontSize: 12, color: Colors.grey)),
+            //                     Text('${entry.value.toStringAsFixed(0)}%',
+            //                         style: const TextStyle(
+            //                             fontSize: 12, fontWeight: FontWeight.w600)),
+            //                   ],
+            //                 ),
+            //               )),
+            //         ],
+            //       ],
+            //     ),
+            //   ),
 
-            // ========= AI ANALYSIS =========
+            // ========= AI ANALYSIS (SMART VERSION) =========
 _buildCard(
-  title: 'AI Analysis',
+  title: 'AI Personal Analysis',
   icon: Icons.auto_awesome,
   iconColor: const Color(0xFF6B4CE6),
-  child: _matchingResult != null && !_matchingResult!.showScoreOnly
-      ? Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Score visualization
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  child: _isLoadingAI
+      ? const Center(
+          child: Padding(
+            padding: EdgeInsets.all(16.0),
+            child: Column(
               children: [
-                Text(
-                  '${_matchingResult!.totalScore.toStringAsFixed(0)}% Match',
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF6B4CE6),
-                  ),
+                CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF6B4CE6)),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: _getCategoryColor(_matchingResult!.category),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    _matchingResult!.category,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+                SizedBox(height: 12),
+                Text(
+                  'Analyzing product for you...',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
                 ),
               ],
             ),
-            
-            const SizedBox(height: 12),
-            
-            // Progress bar
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: LinearProgressIndicator(
-                value: _matchingResult!.totalScore / 100,
-                backgroundColor: Colors.grey[200],
-                valueColor: AlwaysStoppedAnimation<Color>(
-                  _getCategoryColor(_matchingResult!.category),
+          ),
+        )
+      : _aiError != null
+          ? Column(
+              children: [
+                const Icon(Icons.error_outline, color: Colors.red, size: 40),
+                const SizedBox(height: 8),
+                Text(
+                  _aiError!,
+                  style: const TextStyle(fontSize: 13, color: Colors.red),
+                  textAlign: TextAlign.center,
                 ),
-                minHeight: 8,
-              ),
-            ),
-            
-            const SizedBox(height: 16),
-            
-            // Explanation header
-            const Text(
-              'How we calculated this score:',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: Colors.black87,
-              ),
-            ),
-            
-            const SizedBox(height: 12),
-            
-            // Breakdown explanation
-            ..._buildScoreExplanation(),
-            
-            // Confidence label if exists
-            if (_matchingResult!.confidenceLabel != null) ...[
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.orange[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange[200]!),
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: _loadAIAnalysis,
+                  icon: const Icon(Icons.refresh, size: 16),
+                  label: const Text('Retry Analysis'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF6B4CE6),
+                  ),
                 ),
-                child: Row(
-                  children: [
-                    Icon(Icons.info_outline, size: 16, color: Colors.orange[700]),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        _matchingResult!.confidenceLabel!,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.orange[900],
+              ],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // VERDICT BADGE (BIG & CLEAR)
+                if (_aiVerdict.isNotEmpty)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: _getVerdictColor(_aiVerdict).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: _getVerdictColor(_aiVerdict),
+                        width: 2,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          _getVerdictIcon(_aiVerdict),
+                          color: _getVerdictColor(_aiVerdict),
+                          size: 28,
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          _aiVerdict,
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: _getVerdictColor(_aiVerdict),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                
+                const SizedBox(height: 16),
+                
+                // AI EXPLANATION
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF3E8FF),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.psychology, 
+                          color: Color(0xFF6B4CE6), size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _aiAnalysis.isEmpty 
+                              ? 'Generating personalized analysis...' 
+                              : _aiAnalysis,
+                          style: const TextStyle(
+                            fontSize: 13, 
+                            color: Colors.black87,
+                            height: 1.5,
+                          ),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-            
-            // Read more button
-            const SizedBox(height: 12),
-            Center(
-              child: TextButton(
-                onPressed: _showFullAnalysisModal,
-                child: const Text(
-                  'Read More',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: Color(0xFF6B4CE6),
-                    fontWeight: FontWeight.w600,
+                    ],
                   ),
                 ),
-              ),
-            ),
-          ],
-        )
-      : _matchingResult != null && _matchingResult!.showScoreOnly
-          ? Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Column(
-                children: [
-                  Icon(Icons.data_usage, size: 40, color: Colors.grey),
-                  SizedBox(height: 8),
-                  Text(
-                    'Insufficient Product Data',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.black87,
+                
+                // SHOW MATCH SCORE ONLY IF NOT "NOT RECOMMENDED"
+                if (_matchingResult != null && 
+                    !_matchingResult!.showScoreOnly && 
+                    _aiVerdict != 'NOT RECOMMENDED') ...[
+                  const SizedBox(height: 16),
+                  const Divider(),
+                  const SizedBox(height: 12),
+                  
+                  // Match Score Details
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[50],
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                  ),
-                  SizedBox(height: 4),
-                  Text(
-                    'We need more information about this product to calculate a personalized match score.',
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
-                    textAlign: TextAlign.center,
+                    child: Column(
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'Your Match Score',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Row(
+                              children: [
+                                Text(
+                                  '${_matchingResult!.totalScore.toStringAsFixed(0)}%',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: _getCategoryColor(_matchingResult!.category),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: _getCategoryColor(_matchingResult!.category),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    _matchingResult!.category,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        
+                        if (_matchingResult!.breakdown.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          const Divider(height: 1),
+                          const SizedBox(height: 8),
+                          ..._matchingResult!.breakdown.entries.map((entry) => 
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 6.0),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    entry.key,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
+                                  Text(
+                                    '${entry.value.toStringAsFixed(0)}%',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 ],
-              ),
-            )
-          : Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF3E8FF),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Column(
-                children: [
-                  const Icon(Icons.person_outline, size: 40, color: Color(0xFF6B4CE6)),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'No User Preferences Set',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Configure your dietary preferences and health goals in your profile to get personalized product matching.',
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 12),
-                  ElevatedButton(
-                    onPressed: () {
-                      Navigator.of(context).pushNamed('/profile');
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF6B4CE6),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20),
+                
+                // WARNING IF "NOT RECOMMENDED"
+                if (_aiVerdict == 'NOT RECOMMENDED') ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFEBEE),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: const Color(0xFFFF4444),
+                        width: 1,
                       ),
                     ),
-                    child: const Text('Set Up Profile'),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.info_outline, 
+                            color: Color(0xFFFF4444), size: 20),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'This product does not match your dietary preferences or health conditions. Match scoring has been skipped.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFFFF4444),
+                              height: 1.4,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
-              ),
+              ],
             ),
 ),
 

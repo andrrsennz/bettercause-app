@@ -7,7 +7,7 @@ import '../services/category_preference_service.dart';
 
 
 class ProfileService {
-  static const String baseUrl = 'http://10.229.30.249:8080/api';
+  static const String baseUrl = 'https://englacial-joelle-nondichogamic.ngrok-free.dev/api';
 
   Future<UserProfile> getUserProfile(String userId) async {
     final url = Uri.parse('$baseUrl/users/$userId/profile');
