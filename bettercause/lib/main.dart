@@ -9,6 +9,7 @@ import 'services/onboarding_service.dart';
 import 'screens/main_navigation_screen.dart';
 import 'providers/auth_provider.dart';
 import 'package:flutter_gemini/flutter_gemini.dart';
+import 'screens/shopping_list/shopping_list_screen.dart';
 
 const apiKey = 'AIzaSyBTuoYBtnAUoYZ_GmDQqT7r0xphgZcarNQ';
 
@@ -51,6 +52,8 @@ class MyApp extends StatelessWidget {
           '/register': (context) => const RegisterScreen(),
           '/main': (context) => const MainNavigationScreen(),
           '/onboarding_preferences': (context) => const OnboardingFlowScreen(),
+          '/shopping-list': (context) => const ShoppingListScreen(),
+          '/home': (context) => const MainNavigationScreen(),
         },
       ),
     );

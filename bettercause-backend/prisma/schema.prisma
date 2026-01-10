@@ -17,8 +17,16 @@ model User {
   personalValues      UserPersonalValues?
   categoryPreferences UserCategoryPreference[]
 
+  searchHistory SearchHistory[]
+  viewedProducts ViewedProduct[]
+
+  purchases Purchase[]
+  scans     Scan[]
+  ratings   Rating[]
+
   @@map("users")
 }
+
 
 // Add this enum (anywhere near your other enums)
 enum CategoryType {
@@ -58,3 +66,112 @@ model UserCategoryPreference {
 
   @@unique([userId, category, key])
 }
+
+model ShoppingListItem {
+  id        String   @id @default(uuid())
+  userId    String
+  productId String?  // nullable in case you allow manual items
+
+  name      String
+  brand     String
+  imageUrl  String   @default("")
+  category  String   @default("Food & Beverages")
+
+  isBought  Boolean  @default(false)
+
+  addedAt   DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([userId, isBought])
+  @@unique([userId, productId])
+}
+
+model SearchHistory {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  query     String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([userId, createdAt])
+}
+
+model ViewedProduct {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  productId String
+  name      String
+  brand     String
+  imageUrl  String   @default("")
+  category  String   @default("Food & Beverages")
+
+  viewedAt  DateTime @default(now())
+
+  @@index([userId])
+  @@unique([userId, productId])
+}
+
+model Product {
+  id            String   @id @default(uuid())
+  name          String
+  brand         String
+  imageUrl      String   @default("")
+  category      CategoryType
+  nutritionScore String  @default("C") // optional
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  purchases     Purchase[]
+  scans         Scan[]
+  ratings       Rating[]
+}
+
+model Purchase {
+  id        String   @id @default(uuid())
+  userId    String
+  productId String
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  purchasedAt DateTime @default(now())
+
+  @@index([userId, purchasedAt])
+  @@index([productId])
+}
+
+model Scan {
+  id        String   @id @default(uuid())
+  userId    String
+  productId String
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  scannedAt DateTime @default(now())
+
+  @@index([userId, scannedAt])
+  @@index([productId])
+}
+
+model Rating {
+  id        String   @id @default(uuid())
+  userId    String
+  productId String
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  // ex: "good", "bad", or numeric 1-5
+  value     String
+  ratedAt   DateTime @default(now())
+
+  @@unique([userId, productId]) // one rating per product per user (optional)
+  @@index([userId, ratedAt])
+}
+

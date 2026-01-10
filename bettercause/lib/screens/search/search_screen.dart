@@ -4,6 +4,7 @@ import '../../services/search_service.dart';
 import 'product_detail_screen.dart';
 import '../../services/search_history_service.dart';  // NEW
 import '../../services/product_history_service.dart';
+import 'dart:async';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -17,6 +18,8 @@ class _SearchScreenState extends State<SearchScreen> {
   final TextEditingController _searchController = TextEditingController();
   final SearchHistoryService _historyService = SearchHistoryService(); // FIXED
   final ProductHistoryService _productHistory = ProductHistoryService();
+
+  Timer? _debounce;
   List<Map<String, dynamic>> _viewedProducts = [];
 
   List<Product> _allProducts = [];      // browse mode products (dummy)
@@ -47,11 +50,16 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Future<void> _loadViewedProducts() async {
-    final items = await _productHistory.getViewedProducts();
-    if (!mounted) return;
-    setState(() {
-      _viewedProducts = items;
-    });
+    try {
+      final items = await _productHistory.getViewedProducts();
+      if (!mounted) return;
+      setState(() {
+        _viewedProducts = items;
+      });
+    } catch (e) {
+      // If user isn't logged in or ID is missing, just show empty list
+      print("History load error: $e");
+    }
   }
 
   Future<void> _deleteViewedProduct(String id) async {
@@ -114,6 +122,7 @@ class _SearchScreenState extends State<SearchScreen> {
   bool get _isSearching => _searchQuery.isNotEmpty;
 
   void _resetSearch() {
+    _debounce?.cancel();
     setState(() {
       _searchController.clear();
       _searchQuery = '';
@@ -121,6 +130,7 @@ class _SearchScreenState extends State<SearchScreen> {
       _activeFilters.clear();
       _searchResults = [];
       _searchError = null;
+      _isSearchingRemote = false;
     });
   }
 
@@ -164,8 +174,70 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   void dispose() {
+    _debounce?.cancel(); // 👈 ADD THIS LINE
     _searchController.dispose();
     super.dispose();
+  }
+
+  // 2. Called when typing (Debounced). searches but DOES NOT SAVE history.
+  void _onQueryChanged(String value) {
+    setState(() => _searchQuery = value);
+    
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 500), () {
+       _performSearchRemote(value); 
+    });
+  }
+
+  // 3. Called when pressing Enter or Tapping a Chip. Saves history.
+  Future<void> _commitSearch(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.length < 3) return;
+
+    // Update text field visually if needed (e.g. from chip tap)
+    if (_searchController.text != trimmed) {
+      _searchController.text = trimmed;
+      _searchController.selection = TextSelection.fromPosition(
+          TextPosition(offset: trimmed.length));
+    }
+
+    // Save history ONCE
+    await _saveQueryToHistory(trimmed);
+    
+    // Perform search
+    await _performSearchRemote(trimmed);
+  }
+
+  // 4. The actual network call. Never saves history internally.
+  Future<void> _performSearchRemote(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.length < 3) {
+      if (!mounted) return;
+      setState(() {
+        _searchResults = [];
+        _searchError = null;
+        _isSearchingRemote = false;
+      });
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _isSearchingRemote = true;
+      _searchError = null;
+    });
+
+    try {
+      final results = await _service.searchProducts(trimmed);
+      if (!mounted) return;
+      setState(() => _searchResults = results);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _searchError = 'Failed to search products. Please try again.');
+    } finally {
+      if (!mounted) return;
+      setState(() => _isSearchingRemote = false);
+    }
   }
 
   @override
@@ -219,17 +291,25 @@ class _SearchScreenState extends State<SearchScreen> {
                     ),
                     child: TextField(
                       controller: _searchController,
-                      onChanged: (value) {
-                        setState(() => _searchQuery = value);
-                        _performSearch(value);
-                      },
+                      
+                      // ✅ CHANGE 1: Use the new debounce function
+                      onChanged: _onQueryChanged, 
+                      
+                      // ✅ CHANGE 2: Add this to handle "Enter" key
+                      textInputAction: TextInputAction.search,
+                      onSubmitted: (value) => _commitSearch(value),
+
                       decoration: InputDecoration(
                         hintText: 'Search for products and brands',
                         hintStyle: TextStyle(
                           color: Colors.grey[400],
                           fontSize: 15,
                         ),
-                        prefixIcon: Icon(Icons.search, color: Colors.grey[400]),
+                        // ✅ CHANGE 3: Update the search icon to commit search
+                        prefixIcon: IconButton(
+                          icon: Icon(Icons.search, color: Colors.grey[400]),
+                          onPressed: () => _commitSearch(_searchController.text),
+                        ),
                         suffixIcon: Icon(Icons.mic, color: Colors.grey[400]),
                         border: InputBorder.none,
                         contentPadding: const EdgeInsets.symmetric(
@@ -285,7 +365,7 @@ if (_searchHistory.isNotEmpty)
               onTap: () {
                 _searchController.text = q;
                 setState(() => _searchQuery = q);
-                _performSearch(q);
+                _commitSearch(q);
               },
               child: Container(
                 padding: const EdgeInsets.symmetric(
@@ -532,13 +612,17 @@ if (_searchHistory.isNotEmpty)
 
   Widget _buildProductItem(Product product) {
     return GestureDetector(
-      onTap: () {
-        Navigator.push(
+      onTap: () async {
+        // 1. Wait for the user to view the details
+        await Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => ProductDetailScreen(productId: product.id),
           ),
         );
+      if (mounted) {
+          _loadViewedProducts();
+        }
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -635,13 +719,14 @@ if (_searchHistory.isNotEmpty)
 
   Widget _buildRecentlyViewedItem(Map<String, dynamic> item) {
     return GestureDetector(
-      onTap: () {
+      onTap: () async {
         Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => ProductDetailScreen(productId: item["id"]),
           ),
-        ).then((_) => _loadViewedProducts()); // refresh after viewing
+        );
+        if (mounted) _loadViewedProducts();
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),

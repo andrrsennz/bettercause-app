@@ -51,7 +51,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       if (!mounted) return;
 
-            setState(() => _isLoading = false);
+      setState(() => _isLoading = false);
 
       // ✅ After successful register, go to LOGIN instead of HOME
       ScaffoldMessenger.of(context).showSnackBar(
@@ -62,7 +62,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
       );
 
       Navigator.pushReplacementNamed(context, '/login');
-
 
     } catch (e) {
       if (!mounted) return;
@@ -248,6 +247,36 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                         ),
                                       ),
                               ),
+                            ),
+
+                            const SizedBox(height: 16),
+
+                            // GO TO LOGIN - NEW ADDITION
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Text(
+                                  'Already have an account? ',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                                GestureDetector(
+                                  onTap: () {
+                                    Navigator.pushReplacementNamed(
+                                        context, '/login');
+                                  },
+                                  child: const Text(
+                                    'Login',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF8B7FED),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),

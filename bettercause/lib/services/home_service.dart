@@ -1,121 +1,86 @@
+// lib/services/home_service.dart
+
 import '../models/product_model.dart';
+import '../services/search_service.dart';
+import '../services/purchase_history_service.dart';
 
 class HomeService {
-  // TODO: Replace with your actual API endpoint
-  static const String baseUrl = 'https://api.bettercause.com';
+  final SearchService _searchService = SearchService();
+  final PurchaseHistoryService _purchaseHistory = PurchaseHistoryService();
 
-  /// Get all home screen data
-  /// Returns items to rate (max 10), latest purchases (max 5), and latest scans (max 5)
+  /// Get all home screen data:
+  /// - itemsToRate: products in purchase history that don't have experience yet (max 10)
+  /// - latestPurchases: latest purchases (max 5)
+  /// - latestScans: empty for now (implement later if you have scan storage)
   Future<Map<String, List<Product>>> getHomeData() async {
-    // TODO: Implement actual API call
-    // Example:
-    // final response = await http.get(
-    //   Uri.parse('$baseUrl/home'),
-    //   headers: {'Authorization': 'Bearer $token'},
-    // );
-    //
-    // if (response.statusCode == 200) {
-    //   final data = jsonDecode(response.body);
-    //   
-    //   // Apply limits: 10 for ratings, 5 for purchases and scans
-    //   final itemsToRate = (data['itemsToRate'] as List)
-    //       .map((item) => Product.fromJson(item))
-    //       .take(10)
-    //       .toList();
-    //   
-    //   final latestPurchases = (data['latestPurchases'] as List)
-    //       .map((item) => Product.fromJson(item))
-    //       .take(5)
-    //       .toList();
-    //   
-    //   final latestScans = (data['latestScans'] as List)
-    //       .map((item) => Product.fromJson(item))
-    //       .take(5)
-    //       .toList();
-    //   
-    //   return {
-    //     'itemsToRate': itemsToRate,
-    //     'latestPurchases': latestPurchases,
-    //     'latestScans': latestScans,
-    //   };
-    // }
-    //
-    // throw Exception('Failed to load home data');
+    // Optional tiny delay to make UI feel smooth (can remove)
+    // await Future.delayed(const Duration(milliseconds: 200));
 
-    // Dummy data for testing
-    await Future.delayed(const Duration(seconds: 1));
+    // -------------------------
+    // 1) LATEST PURCHASES (max 5)
+    // -------------------------
+    final purchaseRecords = await _purchaseHistory.getPurchases(limit: 5);
+
+    final List<Product> latestPurchases = [];
+    for (final record in purchaseRecords) {
+      final p = await _searchService.getProductById(record.productId);
+      if (p != null) {
+        // Your Product model supports purchaseDate, so we fill it here
+        latestPurchases.add(
+          Product(
+            id: p.id,
+            name: p.name,
+            brand: p.brand,
+            imageUrl: p.imageUrl,
+            purchaseDate: record.purchasedAt,
+            scanDate: null,
+          ),
+        );
+      }
+    }
+
+    // -------------------------
+    // 2) ITEMS TO RATE (max 10)
+    // purchases that don't have experience yet
+    // -------------------------
+    final toRateIds = await _purchaseHistory.getItemsToRateProductIds(limit: 10);
+
+    final List<Product> itemsToRate = [];
+    for (final id in toRateIds) {
+      final p = await _searchService.getProductById(id);
+      if (p != null) {
+        itemsToRate.add(
+          Product(
+            id: p.id,
+            name: p.name,
+            brand: p.brand,
+            imageUrl: p.imageUrl,
+            purchaseDate: null,
+            scanDate: null,
+          ),
+        );
+      }
+    }
+
+    // -------------------------
+    // 3) LATEST SCANS (max 5)
+    // You didn't show scan storage yet -> keep empty
+    // -------------------------
+    final List<Product> latestScans = [];
 
     return {
-      'itemsToRate': [
-        Product(
-          id: '1',
-          name: 'Alpro Oat Milk',
-          brand: 'Oatly',
-          imageUrl: 'https://example.com/alpro.jpg',
-        ),
-        Product(
-          id: '2',
-          name: 'Organic Green Tea',
-          brand: 'Tea Co',
-          imageUrl: 'https://example.com/tea.jpg',
-        ),
-      ],
-      'latestPurchases': [
-        Product(
-          id: '3',
-          name: 'Alpro Oat Milk',
-          brand: 'Alpro',
-          imageUrl: 'https://example.com/alpro.jpg',
-          purchaseDate: DateTime.now().subtract(const Duration(days: 1)),
-        ),
-        Product(
-          id: '4',
-          name: 'V-Soy Oat & Almond Milk',
-          brand: 'V-Soy',
-          imageUrl: 'https://example.com/vsoy.jpg',
-          purchaseDate: DateTime.now().subtract(const Duration(days: 2)),
-        ),
-      ],
-      'latestScans': [
-        Product(
-          id: '5',
-          name: 'Alpro Oat Milk',
-          brand: 'Alpro',
-          imageUrl: 'https://example.com/alpro.jpg',
-          scanDate: DateTime.now().subtract(const Duration(hours: 5)),
-        ),
-        Product(
-          id: '6',
-          name: 'V-Soy Oat & Almond Milk',
-          brand: 'V-Soy',
-          imageUrl: 'https://example.com/vsoy.jpg',
-          scanDate: DateTime.now().subtract(const Duration(hours: 12)),
-        ),
-      ],
+      'itemsToRate': itemsToRate,
+      'latestPurchases': latestPurchases,
+      'latestScans': latestScans,
     };
   }
 
   /// Submit a rating for a product
+  /// rating should be: "GREAT" / "AVERAGE" / "BAD"
   Future<void> submitRating(String productId, String rating) async {
-    // TODO: Implement actual API call
-    // Example:
-    // final response = await http.post(
-    //   Uri.parse('$baseUrl/ratings'),
-    //   headers: {
-    //     'Content-Type': 'application/json',
-    //     'Authorization': 'Bearer $token',
-    //   },
-    //   body: jsonEncode({
-    //     'productId': productId,
-    //     'rating': rating,
-    //   }),
-    // );
-    //
-    // if (response.statusCode != 200) {
-    //   throw Exception('Failed to submit rating');
-    // }
-
-    // Dummy implementation
-    await Future.delayed(const Duration(milliseconds: 500));
+    await _purchaseHistory.setExperience(
+      productId: productId,
+      experience: rating,
+    );
   }
 }

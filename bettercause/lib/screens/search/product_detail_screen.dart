@@ -9,6 +9,10 @@ import '../../models/matching_result_model.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_gemini/flutter_gemini.dart';
+import 'dart:convert'; // Add this if not already there
+import 'package:http/http.dart' as http;
+import '../../services/shopping_list_service.dart';
+import '../../services/purchase_history_service.dart';
 
 
 class ProductDetailScreen extends StatefulWidget {
@@ -20,11 +24,16 @@ class ProductDetailScreen extends StatefulWidget {
   State<ProductDetailScreen> createState() => _ProductDetailScreenState();
 }
 
-class _ProductDetailScreenState extends State<ProductDetailScreen> {
+class _ProductDetailScreenState extends State<ProductDetailScreen> with WidgetsBindingObserver {
+
   final SearchService _service = SearchService();
   Product? _product;
   bool _isLoading = true;
   final ProductHistoryService _history = ProductHistoryService();
+  final ShoppingListService _shoppingListService = ShoppingListService();
+
+  final PurchaseHistoryService _purchaseHistoryService = PurchaseHistoryService();
+  bool _didShowReturnModal = false;
 
   final Gemini gemini = Gemini.instance;
   bool _isLoadingAI = false;
@@ -85,7 +94,41 @@ IconData _getVerdictIcon(String verdict) {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadProduct();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  // ✅ ADD THIS BLOCK:
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _handleReturnFromMarketplace();
+    }
+  }
+
+  Future<void> _handleReturnFromMarketplace() async {
+    if (!mounted) return;
+    if (_didShowReturnModal) return;
+
+    final pending = await _purchaseHistoryService.getPendingPurchase();
+    if (pending == null) return;
+
+    // Only show if it's the same product detail screen
+    if (pending["productId"] != widget.productId) return;
+
+    _didShowReturnModal = true;
+
+    // Clear pending so it won't show again repeatedly
+    await _purchaseHistoryService.clearPendingPurchase();
+
+    if (!mounted) return;
+    _showTrackPurchaseModal(marketplace: pending["marketplace"]);
   }
 
 
@@ -269,7 +312,23 @@ Future<void> _loadProduct() async {
                   Expanded(
                     child: ElevatedButton(
                       onPressed: () async {
-                        await _service.addToShoppingList(widget.productId);
+                        try {
+                          await _shoppingListService.addItemFromOffProductId(widget.productId);
+
+                          if (!mounted) return;
+                          Navigator.of(context).pop();
+                          Navigator.of(context).pushNamed('/shopping-list');
+
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Added to shopping list ✅')),
+                          );
+                        } catch (e) {
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Failed to add item: $e')),
+                          );
+                        }
+
                         if (mounted) {
                           Navigator.of(context).pop();
                           Navigator.of(context).pushNamed('/shopping-list');
@@ -308,90 +367,133 @@ Future<void> _loadProduct() async {
     );
   }
 
-  void _showTrackPurchaseModal() {
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Did you purchase this item?',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  textAlign: TextAlign.center),
-              const SizedBox(height: 24),
-              if (_product != null)
-                Container(
-                  height: 200,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[100],
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: _product!.imageUrl.isNotEmpty
-                      ? ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: Image.network(_product!.imageUrl,
-                              fit: BoxFit.contain,
-                              errorBuilder: (context, error, stackTrace) {
-                            return Center(
-                                child: Text(_getCategoryEmoji(_product!.category),
-                                    style: const TextStyle(fontSize: 80)));
-                          }))
-                      : Center(
-                          child: Text(_getCategoryEmoji(_product!.category),
-                              style: const TextStyle(fontSize: 80))),
-                ),
-              const SizedBox(height: 24),
-              const Text(
-                  'Update your purchase record for better\nfuture suggestions.',
-                  style: TextStyle(fontSize: 14, color: Colors.grey),
-                  textAlign: TextAlign.center),
-              const SizedBox(height: 24),
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () async {
-                        if (mounted) {
-                          Navigator.of(context).pop();
-                          Navigator.of(context).pushNamedAndRemoveUntil(
-                              '/home', (route) => false);
-                        }
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF2D2D2D),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(30)),
-                      ),
-                      child: const Text('Track purchase'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.black,
-                        side: const BorderSide(color: Colors.black),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(30)),
-                      ),
-                      child: const Text('I didn\'t buy it'),
-                    ),
-                  ),
-                ],
+  void _showTrackPurchaseModal({String? marketplace}) {
+  showDialog(
+    context: context,
+    builder: (context) => Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Did you purchase this item?',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 10),
+            if (marketplace != null && marketplace.isNotEmpty)
+              Text(
+                'Marketplace: ${marketplace[0].toUpperCase()}${marketplace.substring(1)}',
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
               ),
-            ],
-          ),
+            const SizedBox(height: 16),
+            if (_product != null)
+              Container(
+                height: 200,
+                decoration: BoxDecoration(
+                  color: Colors.grey[100],
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: _product!.imageUrl.isNotEmpty
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.network(
+                          _product!.imageUrl,
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, __, ___) => Center(
+                            child: Text(
+                              _getCategoryEmoji(_product!.category),
+                              style: const TextStyle(fontSize: 80),
+                            ),
+                          ),
+                        ),
+                      )
+                    : Center(
+                        child: Text(
+                          _getCategoryEmoji(_product!.category),
+                          style: const TextStyle(fontSize: 80),
+                        ),
+                      ),
+              ),
+            const SizedBox(height: 20),
+            const Text(
+              'Update your purchase record for better\nfuture suggestions.',
+              style: TextStyle(fontSize: 14, color: Colors.grey),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      try {
+                        await _purchaseHistoryService.addPurchase(
+                          productId: widget.productId,
+                          marketplace: marketplace,
+                        );
+
+                        if (!mounted) return;
+                        Navigator.of(context).pop(); // close modal
+
+                        // go home and refresh sections
+                        Navigator.of(context).pushNamedAndRemoveUntil(
+                          '/home',
+                          (route) => false,
+                        );
+
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Purchase tracked ✅')),
+                        );
+                      } catch (e) {
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Failed: $e')),
+                        );
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2D2D2D),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                    ),
+                    child: const Text('Track purchase'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () async {
+                      // if pending existed, ensure cleared (safe)
+                      await _purchaseHistoryService.clearPendingPurchase();
+                      if (!mounted) return;
+                      Navigator.of(context).pop();
+                    },
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.black,
+                      side: const BorderSide(color: Colors.black),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                    ),
+                    child: const Text('I didn\'t buy it'),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
+
 
       Future<void> _openMarketplace(String marketplace) async {
     if (_product == null) {
@@ -420,7 +522,12 @@ Future<void> _loadProduct() async {
     }
 
     try {
-      // ❌ DO NOT rely on canLaunchUrl here – just try launching
+      await _purchaseHistoryService.setPendingPurchase(
+        productId: widget.productId,
+        marketplace: marketplace,
+      );
+      _didShowReturnModal = false;
+      
       final launched = await launchUrl(
         url,
         mode: LaunchMode.externalApplication,
@@ -461,12 +568,33 @@ Future<void> _loadProduct() async {
 
     final prompt = _buildAIPrompt(_product!, userPrefs);
     
-    print('🤖 [AI] Sending prompt to Gemini...');
+    print('🤖 [AI] Sending prompt to Gemini via HTTP...');
     
-    final response = await gemini.text(prompt);
+    // ✅ USE DIRECT HTTP REQUEST INSTEAD
+    final response = await http.post(
+      Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=AIzaSyCUX7J7t5S127_HcyoHaiosNIZpzWAoLoo'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'contents': [
+          {
+            'parts': [
+              {'text': prompt}
+            ]
+          }
+        ],
+        'generationConfig': {
+          'temperature': 0.7,
+          'maxOutputTokens': 1024,
+        }
+      }),
+    );
+
+    print('🤖 [AI] Response status: ${response.statusCode}');
     
-    if (mounted) {
-      final analysis = response?.output ?? 'Unable to generate analysis.';
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      final analysis = data['candidates'][0]['content']['parts'][0]['text'] ?? 
+                      'Unable to generate analysis.';
       
       // ✅ PARSE THE VERDICT
       String verdict = '';
@@ -480,19 +608,25 @@ Future<void> _loadProduct() async {
         verdict = 'RECOMMENDED';
       }
       
-      setState(() {
-        _aiAnalysis = analysis;
-        _aiVerdict = verdict;
-        _isLoadingAI = false;
-      });
-      
-      print('✅ [AI] Analysis generated: VERDICT = $verdict');
+      if (mounted) {
+        setState(() {
+          _aiAnalysis = analysis;
+          _aiVerdict = verdict;
+          _isLoadingAI = false;
+        });
+        
+        print('✅ [AI] Analysis generated: VERDICT = $verdict');
+      }
+    } else {
+      throw Exception('API Error: ${response.statusCode} - ${response.body}');
     }
+    
   } catch (e) {
-    print('❌ [AI] Error: $e');
+    print('❌ [AI] Full Error Details: $e');
+    
     if (mounted) {
       setState(() {
-        _aiError = 'Failed to generate AI analysis';
+        _aiError = 'Failed to generate AI analysis. Please try again.';
         _isLoadingAI = false;
       });
     }

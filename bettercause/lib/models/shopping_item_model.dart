@@ -1,13 +1,15 @@
+// lib/models/shopping_item_model.dart
+
 class ShoppingItem {
-  final String id;
+  final String id;          // OFF barcode OR manual id
   final String name;
   final String brand;
   final String imageUrl;
-  final String category;
+  final String category;    // Food & Beverages / Beauty & Care / Household / Electronics
   final bool isBought;
   final DateTime addedDate;
 
-  ShoppingItem({
+  const ShoppingItem({
     required this.id,
     required this.name,
     required this.brand,
@@ -37,27 +39,28 @@ class ShoppingItem {
     );
   }
 
-  factory ShoppingItem.fromJson(Map<String, dynamic> json) {
-    return ShoppingItem(
-      id: json['id'] as String,
-      name: json['name'] as String,
-      brand: json['brand'] as String,
-      imageUrl: json['imageUrl'] as String,
-      category: json['category'] as String,
-      isBought: json['isBought'] as bool,
-      addedDate: DateTime.parse(json['addedDate'] as String),
-    );
-  }
-
   Map<String, dynamic> toJson() {
     return {
-      'id': id,
-      'name': name,
-      'brand': brand,
-      'imageUrl': imageUrl,
-      'category': category,
-      'isBought': isBought,
-      'addedDate': addedDate.toIso8601String(),
+      "id": id,
+      "name": name,
+      "brand": brand,
+      "imageUrl": imageUrl,
+      "category": category,
+      "isBought": isBought,
+      "addedDate": addedDate.toIso8601String(),
     };
+  }
+
+  factory ShoppingItem.fromJson(Map<String, dynamic> json) {
+    return ShoppingItem(
+      id: (json["id"] ?? "").toString(),
+      name: (json["name"] ?? "").toString(),
+      brand: (json["brand"] ?? "").toString(),
+      imageUrl: (json["imageUrl"] ?? "").toString(),
+      category: (json["category"] ?? "Food & Beverages").toString(),
+      isBought: (json["isBought"] ?? false) == true,
+      addedDate: DateTime.tryParse((json["addedDate"] ?? "").toString()) ??
+          DateTime.now(),
+    );
   }
 }

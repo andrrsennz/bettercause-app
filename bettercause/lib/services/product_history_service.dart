@@ -1,59 +1,78 @@
+// lib/services/product_history_service.dart
 import 'dart:convert';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ProductHistoryService {
-  static const String _key = "viewed_products";
+  static const _userIdKey = 'userId';
+  static const _prefix = 'viewed_products_';
 
-  /// Simpan product yang sudah dilihat
+  final FlutterSecureStorage _secure = const FlutterSecureStorage();
+
+  Future<String> _requireUserId() async {
+    final userId = await _secure.read(key: _userIdKey);
+    if (userId == null || userId.isEmpty) {
+      throw Exception('userId not found. Make sure AuthProvider.login() stored it.');
+    }
+    return userId;
+  }
+
+  Future<String> _key() async {
+    final userId = await _requireUserId();
+    return '$_prefix$userId';
+  }
+
+  /// Save viewed product (most recent first, dedupe by id, max 10)
   Future<void> addViewedProduct(Map<String, dynamic> product) async {
     final prefs = await SharedPreferences.getInstance();
+    final key = await _key();
 
-    List<String> existing = prefs.getStringList(_key) ?? [];
+    final id = product["id"]?.toString();
+    if (id == null || id.isEmpty) return;
 
-    // hapus dulu kalau sudah ada id yang sama
+    List<String> existing = prefs.getStringList(key) ?? [];
+
     existing.removeWhere((item) {
       final decoded = jsonDecode(item);
-      return decoded["id"] == product["id"];
+      return decoded["id"]?.toString() == id;
     });
 
-    // masukkan yang baru di paling atas
     existing.insert(0, jsonEncode(product));
 
-    // batasi maksimal 10 item
     if (existing.length > 10) {
       existing = existing.sublist(0, 10);
     }
 
-    await prefs.setStringList(_key, existing);
+    await prefs.setStringList(key, existing);
   }
 
-  /// Ambil semua produk yang pernah dilihat
   Future<List<Map<String, dynamic>>> getViewedProducts() async {
     final prefs = await SharedPreferences.getInstance();
-    final list = prefs.getStringList(_key) ?? [];
+    final key = await _key();
 
+    final list = prefs.getStringList(key) ?? [];
     return list.map((item) {
       return Map<String, dynamic>.from(jsonDecode(item));
     }).toList();
   }
 
-  /// Hapus satu produk berdasarkan id
   Future<void> removeProduct(String id) async {
     final prefs = await SharedPreferences.getInstance();
+    final key = await _key();
 
-    List<String> existing = prefs.getStringList(_key) ?? [];
+    List<String> existing = prefs.getStringList(key) ?? [];
 
     existing.removeWhere((item) {
       final decoded = jsonDecode(item);
-      return decoded["id"] == id;
+      return decoded["id"]?.toString() == id;
     });
 
-    await prefs.setStringList(_key, existing);
+    await prefs.setStringList(key, existing);
   }
 
-  /// Hapus semua history
   Future<void> clearAll() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_key);
+    final key = await _key();
+    await prefs.remove(key);
   }
 }

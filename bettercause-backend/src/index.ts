@@ -8,6 +8,9 @@ import cors from 'cors';
 const authRoutes = require("./routes/auth.routes"); 
 import userRoutes from './routes/userRoutes';
 
+// ✅ NEW: Import the shopping list route (using require because it is a .js file)
+const shoppingListRoutes = require("./routes/shoppingList");
+
 dotenv.config();
 
 const app = express();
@@ -23,6 +26,9 @@ app.get("/", (req: Request, res: Response) => {
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api", userRoutes);
+
+// ✅ NEW: Mount the shopping list route
+app.use("/api/shopping-list", shoppingListRoutes);
 
 app.listen(PORT, () => {
   console.log(`BetterCause API running at http://localhost:${PORT}`);

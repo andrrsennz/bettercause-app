@@ -1,5 +1,8 @@
+// lib/components/home/product_card.dart
+
 import 'package:flutter/material.dart';
 import '../../models/product_model.dart';
+import '../../services/purchase_history_service.dart';
 
 class ProductCard extends StatelessWidget {
   final Product product;
@@ -11,8 +14,23 @@ class ProductCard extends StatelessWidget {
     required this.onTap,
   });
 
+  Color? _experienceColor(String? exp) {
+    switch ((exp ?? '').toUpperCase()) {
+      case 'GREAT':
+        return const Color(0xFF4CAF50); // green
+      case 'AVERAGE':
+        return const Color(0xFFFFA726); // orange/yellow
+      case 'BAD':
+        return const Color(0xFFFF4444); // red
+      default:
+        return null; // no dot
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final PurchaseHistoryService purchaseHistory = PurchaseHistoryService();
+
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -36,9 +54,9 @@ class ProductCard extends StatelessWidget {
             Container(
               width: 140,
               height: 100,
-              decoration: BoxDecoration(
-                color: const Color(0xFFF5F5F5),
-                borderRadius: const BorderRadius.vertical(
+              decoration: const BoxDecoration(
+                color: Color(0xFFF5F5F5),
+                borderRadius: BorderRadius.vertical(
                   top: Radius.circular(12),
                 ),
               ),
@@ -69,7 +87,7 @@ class ProductCard extends StatelessWidget {
                       ),
                     ),
             ),
-            
+
             // Product Info
             Expanded(
               child: Padding(
@@ -78,15 +96,42 @@ class ProductCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(
-                      product.name,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.black,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+                    // Name + Experience Dot (if rated)
+                    FutureBuilder<String?>(
+                      future: purchaseHistory.getExperience(product.id),
+                      builder: (context, snap) {
+                        final dotColor = _experienceColor(snap.data);
+
+                        return Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                product.name,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.black,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (dotColor != null) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                width: 10,
+                                height: 10,
+                                margin: const EdgeInsets.only(top: 4),
+                                decoration: BoxDecoration(
+                                  color: dotColor,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                            ],
+                          ],
+                        );
+                      },
                     ),
                     const SizedBox(height: 4),
                     Text(
